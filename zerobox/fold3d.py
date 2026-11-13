@@ -193,7 +193,9 @@ def project(model, t, cam: Camera, width, height, extra_roll=0.0, light=None, st
         # outside, the ones further round the box go under it. The inset only decides the
         # drawing order - the panel itself is drawn where it really is, otherwise thin
         # strips of the walls' inside would show along the edges.
-        inset = eps * (1 - fc.area / amax) + eps * 0.05 * getattr(fc, "depth", 0)
+        # ... and a printed flap lies over a blank one (the artwork knows which lid is outside)
+        inset = max(0.0, eps * (1 - fc.area / amax) + eps * 0.05 * getattr(fc, "depth", 0)
+                    - eps * 0.3 * getattr(fc, "ink", 0.0))
         off = _trans((0, 0, -inset)) if inset > 0 else np.eye(4)
         VM = V @ M @ off
         H = K @ V @ M @ FLAT

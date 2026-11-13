@@ -93,10 +93,11 @@ def _chain(model):
     if len(walls) < 3:
         return []
     adj = {f: [] for f in walls}
-    for fd in model.folds:
-        if fd.parent in walls and fd.child in walls:
-            adj[fd.parent].append(fd.child)
-            adj[fd.child].append(fd.parent)
+    for f in walls:
+        p = _wall_parent(model, f)
+        if p in walls:
+            adj[p].append(f)
+            adj[f].append(p)
     ends = [f for f, n in adj.items() if len(n) == 1]
     if len(ends) != 2 or any(len(n) > 2 for n in adj.values()):
         return []
@@ -110,10 +111,20 @@ def _chain(model):
     return order if len(order) == len(walls) else []
 
 
+def _wall_parent(model, f):
+    """The panel a wall hangs on, looking through slivers (the seam strip of a two-piece
+    box sits between two walls). -1 for the root."""
+    p = model.faces[f].parent
+    while p >= 0 and model.faces[p].small and model.faces[p].parent >= 0:
+        p = model.faces[p].parent
+    return p
+
+
 def _hinge_between(model, a, b):
-    for fd in model.folds:
-        if {fd.parent, fd.child} == {a, b}:
-            return fd
+    """The fold that turns one of two neighbouring walls against the other."""
+    for child, parent in ((a, b), (b, a)):
+        if model.faces[child].fold >= 0 and _wall_parent(model, child) == parent:
+            return model.folds[model.faces[child].fold]
     return None
 
 
@@ -207,8 +218,10 @@ def solve_tube(model) -> bool:
         else:
             lo = m1
     t = round((lo + hi) / 2, 1)
-    if abs(t - 90) < 0.6 and gap(90.0) <= gap(t) + 0.2:
-        t = 90.0
+    # the exact turn (90 for four sides) wins when the tube closes there as well: a glue
+    # flap drawn a little narrow or tapered must not tilt every wall by a degree
+    if abs(t - base) < 8.0 and gap(base) <= max(gap(t) + 0.2, 0.015 * _size(model)):
+        t = base
     g = gap(t)
     if g > 0.03 * _size(model):
         for h in hinges:

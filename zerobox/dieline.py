@@ -378,11 +378,30 @@ def _select_die(groups: list, page=None) -> None:
     sx0, sy0, sx1, sy1 = seed.bbox()
     span = max(sx1 - sx0, sy1 - sy0)
     tol = max(0.5, span * 0.002)
+    # crease lines are often drawn a little short of the cut lines (another colour, so
+    # another group): such a group still belongs to the die when it is made of plain
+    # lines that end near the die's lines - within what the panel finder can close
+    reach = max(tol, min(12.0, span * 0.03))
+    seed_n = len(seed.strokes)
+
+    def lines_of(g):
+        return [LineString(s.pts + ([s.pts[0]] if s.closed else [])) for s in g.strokes]
+
+    def line_like(g):
+        """Open lines made of a few straight pieces (creases, perforations) - not closed
+        outlines and not curves."""
+        total = plain = 0.0
+        for st in g.strokes:
+            L = st.length()
+            total += L
+            if not st.closed and len(st.pts) <= 8:
+                plain += L
+        return total > 0 and plain >= 0.8 * total
+
     changed = True
     while changed:
         changed = False
-        net = [LineString(s.pts + ([s.pts[0]] if s.closed else []))
-               for gg in groups if gg.selected for s in gg.strokes]
+        net = [ln for gg in groups if gg.selected for ln in lines_of(gg)]
         tree = STRtree(net)
         x0 = min(gg.bbox()[0] for gg in groups if gg.selected)
         y0 = min(gg.bbox()[1] for gg in groups if gg.selected)
@@ -397,17 +416,31 @@ def _select_die(groups: list, page=None) -> None:
                 continue
             # a die group consists of strokes that start/end on the network
             # (closed shapes: share at least two points with it)
-            touching = 0
-            for s in g.strokes:
+            touching = near = 0
+            own = lines_of(g)
+            own_tree = STRtree(own)
+            loose = (len(g.strokes) <= 5 * seed_n + 50 and line_like(g)
+                     and bx0 >= x0 - reach and by0 >= y0 - reach and bx1 <= x1 + reach and by1 <= y1 + reach)
+            for k, s in enumerate(g.strokes):
                 ends = s.pts if s.closed else [s.pts[0], s.pts[-1]]
-                hit = 0
+                hit = close = 0
                 for e in ends:
                     p = Point(e)
                     idx = tree.query(p.buffer(tol))
                     if any(net[i].distance(p) <= tol for i in idx):
                         hit += 1
+                        close += 1
+                    elif loose:
+                        # near a die line, or on another line of this same group
+                        # (creases end on creases)
+                        if any(net[i].distance(p) <= reach for i in tree.query(p.buffer(reach))) or \
+                                any(int(i) != k and own[int(i)].distance(p) <= tol
+                                    for i in own_tree.query(p.buffer(tol))):
+                            close += 1
                 if hit >= 2:
                     touching += 1
-            if touching >= max(1, 0.6 * len(g.strokes)):
+                if close >= 2:
+                    near += 1
+            if touching >= max(1, 0.6 * len(g.strokes)) or (loose and near >= max(1, 0.7 * len(g.strokes))):
                 g.selected = True
                 changed = True

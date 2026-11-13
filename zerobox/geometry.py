@@ -346,6 +346,29 @@ def faces_from_strokes(strokes, grid=0.1, heal=True):
     return back(polys)
 
 
+def _fill_islands(polys):
+    """Shapes lying completely inside one panel (a frame or letters drawn in the die's
+    own colour, a window cut-out) are not panels: they are dropped and the panel is
+    made whole again. A hole that holds most of the die (a frame drawn round it) stays."""
+    out = list(polys)
+    drop = set()
+    tree = STRtree(polys)
+    for i, p in enumerate(polys):
+        if not p.interiors:
+            continue
+        keep = []
+        for ring in p.interiors:
+            hole = Polygon(ring)
+            inside = [int(j) for j in tree.query(hole) if int(j) != i
+                      and hole.buffer(0.2).covers(polys[int(j)])]
+            if hole.area < 0.5 * p.area and sum(polys[j].area for j in inside) < 0.5 * p.area:
+                drop.update(inside)                  # the hole is filled: p is solid there
+            else:
+                keep.append(ring)
+        out[i] = Polygon(p.exterior, keep)
+    return [q for k, q in enumerate(out) if k not in drop]
+
+
 def _shared(a: Polygon, b: Polygon):
     inter = a.boundary.intersection(b.boundary)
     if inter.is_empty:
@@ -566,6 +589,7 @@ def build(strokes, root: int | None = None, angles: dict | None = None, solve=Tr
     polys = faces_from_strokes(strokes)
     if not polys:
         return None
+    polys = _fill_islands(polys)
     source_bbox = unary_union(polys).bounds
     skew = _skew(polys)
     if skew:

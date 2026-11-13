@@ -190,6 +190,8 @@ class MainWindow(QMainWindow):
         self.shapes = []                    # hand-drawn panels (die pt), shared with the 2D view
         self._loading = 0
         self._build_gen = 0
+        self._front_hint = None             # front panel suggested by the artwork (face key)
+        self._front_tried = False
         self.setWindowTitle(f"{APP_NAME} — щанца в 3D кутия")
         self.setWindowIcon(brand.app_icon())
         self.resize(1360, 860)
@@ -623,6 +625,7 @@ class MainWindow(QMainWindow):
         self.root = None
         self.manual = geometry.Manual()
         self.angle_overrides = {}
+        self._front_hint, self._front_tried = None, False
         self.shapes.clear()
         self.view2d.sel_shape = -1
         self.art = None
@@ -720,6 +723,8 @@ class MainWindow(QMainWindow):
             strokes = self.src.selected_strokes()
             fold_lines = roles.fold_strokes(self.src.groups)
         overrides, manual = dict(self.angle_overrides), copy.deepcopy(self.manual)
+        if not manual.root and self._front_hint and not self.shapes:
+            manual.root = self._front_hint       # the artwork says which wall is the front
         self._build_gen += 1
         gen = self._build_gen
         self._busy("Сгъвам кутията…")
@@ -821,6 +826,20 @@ class MainWindow(QMainWindow):
         self.view2d.art, self.view2d.art_rect = self.art, self.art_rect
         if self.model is not None:
             self.view3d.tex = render.Textures(self.model, self.art, self.art_rect)
+            try:
+                ink = render.face_ink(self.model, self.art, self.art_rect)
+            except Exception:                                   # noqa: BLE001 - only a hint
+                traceback.print_exc()
+                ink = {}
+            for f in self.model.faces:
+                f.ink = ink.get(f.id, 0.0)
+            if not self._front_tried and ink and not self.manual.root and not self.shapes:
+                # once per file: turn the box so its printed front faces the viewer
+                self._front_tried = True
+                fid = render.pick_front(self.model, ink)
+                if fid is not None:
+                    self._front_hint = self.model.faces[fid].key
+                    self._rebuild()
         self.view2d.update()
         self.view3d.update()
 

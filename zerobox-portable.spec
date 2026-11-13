@@ -20,5 +20,5 @@ a.datas = [d for d in a.datas if "translations" not in d[0].lower()
                                                                "plugins/generic", "plugins/qmltooling"))]
 
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ZeroBox-Portable-1.9.0", console=False,
+exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ZeroBox-Portable-1.9.1", console=False,
           icon="assets/zerobox.ico", version="version_info.txt", upx=False)

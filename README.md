@@ -46,6 +46,7 @@ The result is a single file, `release/ZeroBox-Portable-<version>.exe`.
 py tests/test_core.py     # unit tests
 py tests/stress.py        # 42 box styles x drawing styles x rotation / mirror / scale
 py tests/stress2.py       # harder inputs: details, junk, degenerate shapes, manual edits
+py tests/two_colour.py    # dies in two colours with creases drawn short, artwork in the die colour
 py tests/ui_fuzz.py       # random clicks, drags, keys, edits and exports on the window
 ```
 

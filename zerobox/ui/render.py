@@ -158,6 +158,79 @@ class Textures:
             self.faces[f.id] = FaceTex(face_path(f), brush)
 
 
+def face_ink(model, art: QImage | None, art_rect: QRectF | None) -> dict:
+    """How much of each panel is printed, 0..1 (share of its area that is not blank
+    paper). Tells the printed lid from the blank flap under it, and the front of the
+    box from its back."""
+    if art is None or art.isNull() or art_rect is None or not model.faces:
+        return {}
+    k = min(1.0, 700.0 / max(art.width(), art.height()))
+    small = art.scaled(max(1, int(art.width() * k)), max(1, int(art.height() * k)),
+                       Qt.IgnoreAspectRatio, Qt.SmoothTransformation).convertToFormat(QImage.Format_ARGB32)
+    w, h = small.width(), small.height()
+    sx, sy = w / art_rect.width(), h / art_rect.height()
+    # every panel painted with its own number, at the place its artwork is
+    label = QImage(w, h, QImage.Format_RGB32)
+    label.fill(0)
+    p = QPainter(label)
+    p.setPen(Qt.NoPen)
+    for f in model.faces:
+        ox, oy = getattr(f, "offset", (0.0, 0.0))
+        t = QTransform()
+        t.scale(sx, sy)
+        t.translate(-art_rect.x() - ox, -art_rect.y() - oy)
+        p.setTransform(t)
+        n = f.id + 1
+        p.setBrush(QColor((n >> 16) & 255, (n >> 8) & 255, n & 255))
+        p.drawPath(face_path(f))
+    p.end()
+    lab = np.array(label.constBits(), dtype=np.uint8).reshape(h, label.bytesPerLine() // 4, 4)[:, :w]
+    ids = (lab[..., 2].astype(np.int32) << 16) | (lab[..., 1].astype(np.int32) << 8) | lab[..., 0]
+    px = np.array(small.constBits(), dtype=np.uint8).reshape(h, small.bytesPerLine() // 4, 4)[:, :w, :3]
+    # paper = the lightest common tone of the sheet; anything clearly darker or coloured is print
+    paper = np.percentile(px.reshape(-1, 3), 98, axis=0).astype(np.int16)
+    printed = (np.abs(px.astype(np.int16) - paper).max(axis=2) > 18)
+    total = np.bincount(ids.ravel(), minlength=len(model.faces) + 1)
+    inked = np.bincount(ids.ravel(), weights=printed.ravel(), minlength=len(model.faces) + 1)
+    return {f.id: float(inked[f.id + 1] / total[f.id + 1]) if total[f.id + 1] else 0.0 for f in model.faces}
+
+
+def pick_front(model, ink: dict):
+    """The wall that should face the viewer, judged by the artwork: the front of a box
+    is the big wall with the most print on it and on the lids hanging on it (the blank
+    flaps are the inner ones). None when the artwork does not say clearly."""
+    if not ink or model.tube_sides == 0:
+        return None
+    faces, folds = model.faces, model.folds
+    walls = [faces[f] for f in model.walls if not faces[f].small]
+    if len(walls) < 2:
+        return None
+    top = max(f.area for f in walls)
+    cands = [f for f in walls if f.area >= 0.85 * top]
+    if len(cands) < 2:
+        return None
+
+    def lids(f):
+        out, st = [], list(f.children)
+        while st:
+            c = faces[st.pop()]
+            if c.id in model.walls:
+                continue
+            if c.small:
+                st.extend(c.children)             # a sliver between the wall and its lid
+            elif c.area >= 0.2 * f.area and folds[c.fold].angle:
+                out.append(c)
+        return out
+
+    def score(f):
+        return ink.get(f.id, 0.0) + sum(ink.get(c.id, 0.0) for c in lids(f))
+    best = max(cands, key=score)
+    current = faces[model.root]
+    if best.id == current.id or (current in cands and score(best) < score(current) + 0.1):
+        return None
+    return best.id
+
+
 @dataclass
 class RenderOptions:
     background: str = "studio"        # studio | white | transparent | color
